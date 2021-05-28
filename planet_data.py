@@ -3,7 +3,8 @@
 
 # In[1]:
 
-
+G_meters = 6.67408e-11
+G = G_meters*10**-9
 sun = {
         'name': 'Sun',
         'mass': 1.989e30,
@@ -13,7 +14,7 @@ sun = {
 earth = {
         'name': 'Earth',
         'mass': 5.972e24,
-        'mu': 5.972e24*6.67408e-11,
+        'mu': 5.972e24*G,
         'radius': 6378.0
 }
 

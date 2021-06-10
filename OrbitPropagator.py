@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+from math import degrees
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import ode
@@ -7,10 +8,18 @@ from mpl_toolkits.mplot3d import Axes3D
 import planet_data as pd
 import tools as T
 
+def null_perts():
+    return {
+        'J2': False,
+        'aero': False,
+        'moon_grav': False,
+        'solar_grav':False
+    }
+
 class orbitPropagator:
-    def __init__(self,state0,tspan, dt,coes= False, cb = pd.earth):
+    def __init__(self,state0,tspan, dt,coes= False, deg = True, cb = pd.earth, perts = null_perts()):
         if coes:
-            self.r0, self.v0 = T.coes2rv(state0, mu = cb['mu'])
+            self.r0, self.v0 = T.coes2rv(state0, deg = deg, mu = cb['mu'])
         else:
             self.r0 = state0[:3]
             self.v0 = state0[3:]
@@ -34,6 +43,11 @@ class orbitPropagator:
         self.solver = ode(self.diff_eqn)
         self.solver.set_integrator('lsoda')
         self.solver.set_initial_value(self.y0, 0)
+        
+        # define perturbations dictionary
+        self.perts = perts
+        
+        self.propagate_orbit()
 
     def propagate_orbit(self):
         #propogate orbit
@@ -45,7 +59,7 @@ class orbitPropagator:
         self.rs = self.ys[:,:3]
         self.vs = self.ys[:,3:]
     
-    def diff_eqn(self, t, y):
+    def diff_eqn(self, t, y):  
         # unpack the state
         rx, ry, rz, vx, vy, vz = y
         r = np.array([rx, ry, rz])
@@ -54,9 +68,18 @@ class orbitPropagator:
         norm_r = np.linalg.norm(r)
 
         #two body acceleration
-        ax, ay, az = -r*self.cb['mu']/norm_r**3
+        a = -r*self.cb['mu']/norm_r**3
 
-        return [vx,vy,vz, ax, ay, az]
+        if self.perts['J2']:
+            z2 = r[2]**2
+            r2 = norm_r**2
+            tx = r[0]/norm_r*(5*z2/r2-1)
+            ty = r[1]/norm_r*(5*z2/r2-1)
+            tz = r[2]/norm_r*(5*z2/r2-1)
+
+            a_j2 = 1.5*self.cb['J2']*self.cb['mu']*self.cb['radius']**2/norm_r**4*np.array([tx,ty,tz])
+            a+=a_j2
+        return [vx,vy,vz, a[0], a[1], a[2]]
     
     def plot3d (self, show_plot = False ,save_plot = False ):
         fig=plt.figure(figsize=(4,4))
@@ -99,23 +122,69 @@ class orbitPropagator:
         if save_plot:
             plt.savefig('Two body'+'.png', dpi = 300)
 
+    def calculate_coes(self):
+        print('Calculating COEs...')
 
-cb = pd.earth
-if __name__ == '__main__':
-    #initial condition of orbit parameters
-    r_mag = cb['radius'] +1500 #km
-    v_mag = np.sqrt(cb['mu']/r_mag) #km/s
+        self.coes = np.zeros((self.n_steps,6))
 
-    #initial position and velocity vectors
-    r0 = [r_mag, r_mag*0.01,r_mag*0.1]
-    v0 = [0, v_mag, v_mag*0.1]
+        for n in range(self.n_steps):
+            self.coes[n, :] = T.rv2coes(self.rs[n,:], self.vs[n,:], mu = self.cb['mu'], degrees = degrees)
 
-    #timespane
-    tspan = 6*3600*24.0
+    def plot_coes(self, hours = False, days = False, show_plot = False, save_plot = False, title = 'COEs', figsize = (16,6)):
+        print("Plotting COEs...")
 
-    #timestep
-    dt = 100.0
+        fig, axs = plt.subplots(nrows=2, ncols=3, figsize = figsize)
+        fig.suptitle(title, fontsize = 20)
 
-    op = orbitPropagator(r0, v0, tspan, dt)
-    op.propagate_orbit()
-    op.plot3d(show_plot = True)
+        # x axis
+        if hours:
+            ts = self.ts/3600.0
+            xlabel = 'Time Lapsed (hours)'
+        elif self.days:
+            ts = self.ts/3600.0/24.0
+            xlabel = 'Time Lapsed (days)'
+        else:
+            ts = self.ts
+            xlabel = 'Time Lapsed (seconds)'
+
+
+
+        #plot true anomaly
+        axs[0,0].plot(self.ts, self.coes[:,3])
+        axs[0,0].set_title('True Anomaly vs. Time')
+        axs[0,0].grid(True)
+        axs[0,0].set_ylabel('Angle (degrees)')
+
+        #plot semi major axis
+        axs[1,0].plot(self.ts, self.coes[:,0])
+        axs[1,0].set_title('Semi Major Axis vs. Time')
+        axs[1,0].grid(True)
+        axs[1,0].set_ylabel('Semi Major Axis (km')
+        axs[1,0].set_xlabel(xlabel)
+
+        #plot eccentricity 
+        axs[0,1].plot(self.ts, self.coes[:,1])
+        axs[0,1].set_title('Eccentricity vs. Time')
+        axs[0,1].grid(True)
+
+        #plot argument of periapse
+        axs[0,2].plot(self.ts, self.coes[:,4])
+        axs[0,2].set_title('Argument of Periapse vs. Time')
+        axs[0,2].grid(True)
+
+        #plot inclination
+        axs[1,1].plot(self.ts, self.coes[:,2])
+        axs[1,1].set_title('Inclination vs. Time')
+        axs[1,1].grid(True)
+        axs[1,1].set_ylabel('Angle (degrees)')
+        axs[1,1].set_xlabel(xlabel)
+
+        #plot RAAN
+        axs[1,2].plot(self.ts, self.coes[:,5])
+        axs[1,2].set_title('RAAN vs. Time')
+        axs[1,2].grid(True)
+        axs[1,2].set_xlabel(xlabel)
+
+        if show_plot:
+            plt.show()
+        
